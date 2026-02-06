@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/dharanigowtham/dag"
-	"github.com/dharanigowtham/dag/postgres"
+	"github.com/meikuraledutech/dag"
+	"github.com/meikuraledutech/dag/postgres"
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

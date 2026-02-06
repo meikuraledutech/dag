@@ -40,13 +40,13 @@ Interface-based DAG (Directed Acyclic Graph) storage. Code against `dag.Store`, 
 ## Installation & Setup
 
 ```bash
-go get github.com/dharanigowtham/dag
+go get github.com/meikuraledutech/dag
 ```
 
 ```go
 import (
-    "github.com/dharanigowtham/dag"
-    "github.com/dharanigowtham/dag/postgres"
+    "github.com/meikuraledutech/dag"
+    "github.com/meikuraledutech/dag/postgres"
 )
 ```
 

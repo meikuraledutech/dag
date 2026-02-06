@@ -1,4 +1,4 @@
-module github.com/dharanigowtham/dag
+module github.com/meikuraledutech/dag
 
 go 1.25.0
 

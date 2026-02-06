@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dharanigowtham/dag"
+	"github.com/meikuraledutech/dag"
 	"github.com/google/uuid"
 )
 
