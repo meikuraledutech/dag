@@ -45,8 +45,8 @@ go get github.com/meikuraledutech/dag
 
 ```go
 import (
-    "github.com/meikuraledutech/dag"
-    "github.com/meikuraledutech/dag/postgres"
+    dag "github.com/meikuraledutech/dag/v1"
+    "github.com/meikuraledutech/dag/v1/postgres"
 )
 ```
 
@@ -60,7 +60,7 @@ if err != nil {
 
 var store dag.Store = postgres.New(pool)
 
-// Create tables on startup (idempotent, safe to call every time)
+// Create tables and apply migrations on startup (idempotent, safe to call every time)
 if err := store.CreateSchema(ctx); err != nil {
     log.Fatal(err)
 }
@@ -69,20 +69,28 @@ if err := store.CreateSchema(ctx); err != nil {
 ### Folder Structure
 
 ```
-DAG/
-├── dag.go              # Types: DAG, Node, Edge
-├── store.go            # Store interface + sentinel errors
-├── postgres/
-│   ├── postgres.go     # PGStore struct, New()
-│   ├── schema.go       # CreateSchema, DropSchema
-│   ├── dag.go          # CreateDAG, GetDAG, DeleteDAG
-│   ├── node.go         # AddNode, GetNode, UpdateNode, DeleteNode, ListNodes
-│   └── edge.go         # AddEdge, GetEdge, UpdateEdge, DeleteEdge, ListEdges
-├── schema.sql          # Raw SQL reference
-├── server/
-│   └── main.go         # Fiber HTTP server
-└── example/
-    └── main.go         # CLI demo
+dag/                          # Root (go.mod: github.com/meikuraledutech/dag)
+├── v1/                       # Version 1 (stable)
+│   ├── dag.go                # Types: DAG, Node, Edge, MigrationRecord
+│   ├── store.go              # Store interface + sentinel errors
+│   ├── postgres/
+│   │   ├── postgres.go       # PGStore struct, New()
+│   │   ├── schema.go         # CreateSchema, DropSchema (uses migrations)
+│   │   ├── migrate.go        # Migration runner (NEW)
+│   │   ├── migrations/       # SQL migrations (NEW)
+│   │   │   ├── 001_initial_schema.up.sql
+│   │   │   └── 001_initial_schema.down.sql
+│   │   ├── dag.go            # CreateDAG, GetDAG, DeleteDAG
+│   │   ├── node.go           # AddNode, GetNode, UpdateNode, DeleteNode, ListNodes
+│   │   └── edge.go           # AddEdge, GetEdge, UpdateEdge, DeleteEdge, ListEdges
+│   ├── schema.sql            # Raw SQL reference (historical)
+│   ├── server/
+│   │   └── main.go           # Fiber HTTP server
+│   └── example/
+│       └── main.go           # CLI demo
+├── README.md                 # Getting started
+├── DOCS.md                   # This file (API reference)
+└── LICENSE                   # BSD 3-Clause License
 ```
 
 ---
@@ -1142,19 +1150,89 @@ func handleError(c fiber.Ctx, err error) error {
 
 ## Migration & Schema Management
 
+### How Migrations Work
+
+DAG uses a **version-controlled migration system**:
+
+- Migration files live in `v1/postgres/migrations/` as `.up.sql` and `.down.sql` files
+- `migrate.go` loads them at runtime using Go's `//go:embed` directive
+- `CreateSchema()` applies all pending migrations transactionally
+- Each migration is tracked in the `dag_migrations` table with SHA256 checksum
+
+**Migration files:**
+```
+v1/postgres/migrations/
+├── 001_initial_schema.up.sql    # CREATE TABLE statements
+└── 001_initial_schema.down.sql  # DROP TABLE statements
+```
+
 ### First-time setup
 
-Call `CreateSchema` on app startup. It uses `IF NOT EXISTS` — safe to run every time.
+Call `CreateSchema` on app startup. It applies all pending migrations — safe to call every time.
 
 ```go
 store.CreateSchema(ctx)
 ```
 
-Or run the SQL manually:
+This will:
+1. Create `dag_migrations` tracking table (if it doesn't exist)
+2. Load migration files from `migrations/` directory
+3. Apply each pending migration in a transaction
+4. Record checksum in tracking table
+
+**Output:** All schema tables created, ready to use.
+
+### Migration status
+
+Check which migrations have been applied:
+
+```go
+records, _ := store.MigrationStatus(ctx)
+for _, rec := range records {
+    fmt.Printf("%s: applied=%v at=%v\n", rec.Name, rec.Applied, rec.AppliedAt)
+}
+```
+
+Or via SQL:
 
 ```bash
-psql $DATABASE_URL -f schema.sql
+psql $DATABASE_URL -c "SELECT name, applied_at, checksum FROM dag_migrations;"
 ```
+
+### Adding future migrations
+
+To add a column or modify the schema:
+
+1. Create new migration files:
+```
+v1/postgres/migrations/
+├── 001_initial_schema.up.sql
+├── 001_initial_schema.down.sql
+├── 002_add_label_column.up.sql       # NEW
+└── 002_add_label_column.down.sql     # NEW
+```
+
+2. **002_add_label_column.up.sql:**
+```sql
+ALTER TABLE dag_nodes ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '';
+```
+
+3. **002_add_label_column.down.sql:**
+```sql
+ALTER TABLE dag_nodes DROP COLUMN IF EXISTS label;
+```
+
+4. Restart your app — `CreateSchema()` will auto-apply the new migration
+
+### Rollback (optional)
+
+Revert the last applied migration:
+
+```go
+err := store.Rollback(ctx)
+```
+
+This executes the `.down.sql` file and removes the migration record.
 
 ### Drop everything (destructive)
 
@@ -1162,16 +1240,12 @@ psql $DATABASE_URL -f schema.sql
 store.DropSchema(ctx)
 ```
 
-Or via HTTP:
+This drops all DAG tables and the migrations tracking table.
+
+Via HTTP:
 
 ```bash
 curl -X DELETE http://localhost:3000/schema
-```
-
-Or SQL:
-
-```bash
-psql $DATABASE_URL -c "DROP TABLE IF EXISTS dag_edges, dag_nodes CASCADE;"
 ```
 
 ### Reset (drop + recreate)
@@ -1181,33 +1255,12 @@ store.DropSchema(ctx)
 store.CreateSchema(ctx)
 ```
 
-Or via curl:
-
-```bash
-curl -X DELETE http://localhost:3000/schema
-curl -X POST http://localhost:3000/schema
-```
-
-### Adding columns (future migrations)
-
-The schema uses `IF NOT EXISTS` for idempotent creation. For schema changes (adding columns, etc.), use standard SQL migrations:
-
-```sql
--- Example: add a "label" column to nodes
-ALTER TABLE dag_nodes ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '';
-
--- Example: add an "updated_at" column
-ALTER TABLE dag_nodes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
-ALTER TABLE dag_edges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
-```
-
-Run these via `psql`, a migration tool (goose, migrate, atlas), or add them to `CreateSchema`.
-
 ### Checking current schema
 
 ```bash
 psql $DATABASE_URL -c "\d dag_nodes"
 psql $DATABASE_URL -c "\d dag_edges"
+psql $DATABASE_URL -c "SELECT * FROM dag_migrations;"
 ```
 
 ---

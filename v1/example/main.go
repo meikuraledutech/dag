@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/meikuraledutech/dag"
-	"github.com/meikuraledutech/dag/postgres"
+	dagpkg "github.com/meikuraledutech/dag/v1"
+	"github.com/meikuraledutech/dag/v1/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,7 +27,7 @@ func main() {
 	defer pool.Close()
 
 	// Wire up the postgres implementation behind the Store interface.
-	var store dag.Store = postgres.New(pool)
+	var store dagpkg.Store = postgres.New(pool)
 
 	// 1. Create tables
 	if err := store.CreateSchema(ctx); err != nil {
@@ -36,14 +36,14 @@ func main() {
 	fmt.Println("schema created")
 
 	// ── Bulk insert using refs (tree insert) ──────────────────────────
-	form := &dag.DAG{
+	form := &dagpkg.DAG{
 		ID: "onboarding-form",
-		Nodes: []dag.Node{
+		Nodes: []dagpkg.Node{
 			{Ref: "q1", Data: json.RawMessage(`{"question": "What is your role?", "type": "select"}`)},
 			{Ref: "q2", Data: json.RawMessage(`{"question": "Preferred language?", "type": "select"}`)},
 			{Ref: "q3", Data: json.RawMessage(`{"question": "Preferred design tool?", "type": "select"}`)},
 		},
-		Edges: []dag.Edge{
+		Edges: []dagpkg.Edge{
 			{FromNodeRef: "q1", ToNodeRef: "q2", Data: json.RawMessage(`{"answer": "Developer"}`)},
 			{FromNodeRef: "q1", ToNodeRef: "q3", Data: json.RawMessage(`{"answer": "Designer"}`)},
 		},
@@ -65,7 +65,7 @@ func main() {
 	printJSON(result)
 
 	// ── Granular: add a single node ───────────────────────────────────
-	q4ID, err := store.AddNode(ctx, "onboarding-form", &dag.Node{
+	q4ID, err := store.AddNode(ctx, "onboarding-form", &dagpkg.Node{
 		Data: json.RawMessage(`{"question": "Years of experience?", "type": "number"}`),
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func main() {
 
 	// ── Granular: add an edge from q2 → q4 ────────────────────────────
 	q2ID := created.Nodes[1].ID
-	edgeID, err := store.AddEdge(ctx, "onboarding-form", &dag.Edge{
+	edgeID, err := store.AddEdge(ctx, "onboarding-form", &dagpkg.Edge{
 		FromNodeID: q2ID,
 		ToNodeID:   q4ID,
 		Data:       json.RawMessage(`{"answer": "any"}`),

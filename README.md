@@ -33,37 +33,50 @@ So I built this package to:
 ## How It's Structured
 
 ```
-DAG/
-├── dag.go              # Types: DAG, Node, Edge (no DB dependency)
-├── store.go            # Store interface + error definitions
-├── postgres/           # PostgreSQL implementation
-│   ├── postgres.go     # PGStore struct, constructor
-│   ├── schema.go       # Create/drop tables
-│   ├── dag.go          # Bulk DAG operations
-│   ├── node.go         # Individual node CRUD
-│   └── edge.go         # Individual edge CRUD
-├── server/             # Fiber HTTP server (all 16 endpoints)
-│   └── main.go
-├── example/            # CLI demo
-│   └── main.go
-├── schema.sql          # Raw SQL for reference
-└── DOCS.md             # Complete API reference
+dag/                     # Root directory
+├── go.mod              # Go module: github.com/meikuraledutech/dag
+├── go.sum
+├── v1/                 # Version 1 (current stable)
+│   ├── dag.go          # Types: DAG, Node, Edge, MigrationRecord (no DB dependency)
+│   ├── store.go        # Store interface + error definitions
+│   ├── postgres/       # PostgreSQL implementation
+│   │   ├── postgres.go       # PGStore struct, constructor
+│   │   ├── schema.go         # Create/drop tables
+│   │   ├── migrate.go        # Migration system (NEW)
+│   │   ├── migrations/       # SQL migration files (NEW)
+│   │   │   ├── 001_initial_schema.up.sql
+│   │   │   └── 001_initial_schema.down.sql
+│   │   ├── dag.go            # Bulk DAG operations
+│   │   ├── node.go           # Individual node CRUD
+│   │   └── edge.go           # Individual edge CRUD
+│   ├── server/         # Fiber HTTP server (all 16 endpoints)
+│   │   └── main.go
+│   ├── example/        # CLI demo
+│   │   └── main.go
+│   └── schema.sql      # Raw SQL reference (historical)
+├── README.md           # This file
+├── DOCS.md             # Complete API reference
+└── LICENSE             # BSD 3-Clause License
 ```
 
-The key idea: `dag.go` and `store.go` at the root define the **types and interface** with zero database dependency. The `postgres/` package is one implementation. Tomorrow I can add `mysql/` or `sqlite/` without changing a single line in my app.
+**Key ideas:**
+- `dag.go` and `store.go` in v1/ define the **types and interface** with zero database dependency
+- `postgres/` is one implementation. Can add `mysql/`, `sqlite/` later without changing app code
+- **Migrations** are version-controlled `.sql` files in `migrations/` and managed by `migrate.go`
+- Import as: `github.com/meikuraledutech/dag/v1`
 
 ## Quick Start
 
 ```go
 import (
-    "github.com/meikuraledutech/dag"
-    "github.com/meikuraledutech/dag/postgres"
+    "github.com/meikuraledutech/dag/v1"
+    "github.com/meikuraledutech/dag/v1/postgres"
 )
 
 // Setup
 pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 var store dag.Store = postgres.New(pool)
-store.CreateSchema(ctx)
+store.CreateSchema(ctx)  // Applies all pending migrations
 
 // Create a form DAG using refs (no need to manage IDs yourself)
 result, _ := store.CreateDAG(ctx, &dag.DAG{

@@ -1,6 +1,9 @@
 package dag
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // DAG represents a directed acyclic graph containing nodes and edges.
 type DAG struct {
@@ -26,4 +29,12 @@ type Edge struct {
 	FromNodeRef string          `json:"from_node_ref,omitempty"`
 	ToNodeRef   string          `json:"to_node_ref,omitempty"`
 	Data        json.RawMessage `json:"data"`
+}
+
+// MigrationRecord tracks a single applied migration.
+type MigrationRecord struct {
+	Name      string
+	Applied   bool
+	AppliedAt *time.Time
+	Checksum  string
 }
